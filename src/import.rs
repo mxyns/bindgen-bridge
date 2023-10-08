@@ -16,10 +16,10 @@ pub struct Type(usize);
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CName {
     /// The identifier used to address a type
-    identifier: String,
+    pub identifier: String,
 
     /// Whether the name of [CName::identifier] is an alias or not
-    aliased: bool,
+    pub aliased: bool,
 }
 
 /// One mapping between a type's C name, Rust name, and C aliases
@@ -27,17 +27,17 @@ pub struct CName {
 pub struct NameMapping {
 
     /// The kind of composite type (struct or union)
-    kind: CompKind,
+    pub kind: CompKind,
 
     /// Name of the imported type from C
     /// This is optional because of anonymous types
-    c_name: Option<CName>,
+    pub c_name: Option<CName>,
 
     /// Name of the type in Rust after import by bindgen
-    rust_name: String,
+    pub rust_name: String,
 
     /// List of known aliases for the type
-    aliases: BTreeSet<String>,
+    pub aliases: BTreeSet<String>,
 }
 
 impl NameMapping {
@@ -70,10 +70,10 @@ impl NameMapping {
 #[derive(Debug, Default, Clone)]
 pub struct NameMappings {
     /// The discovered types and their mappings
-    types: HashMap<Type, NameMapping>,
+    pub types: HashMap<Type, NameMapping>,
 
     /// The known aliases without an associated type mappings
-    aliases: HashMap<Type, BTreeSet<String>>,
+    pub aliases: HashMap<Type, BTreeSet<String>>,
 }
 
 impl NameMappings {
@@ -110,7 +110,7 @@ impl NameMappings {
 
     /// Generates a [phf_codegen] static map from the mappings
     ///
-    /// Uses the first alias given by the [NameMappings::aliases]'s BTreeSet values for the rename rule
+    /// Uses the first alias given by the [NameMappings::aliases]'s [BTreeSet] values for the rename rule
     /// (no guarantee on which one, but it's likely be based on Strings' alphabetical ordering)
     pub fn to_static_map(&self, use_aliases: bool) -> Result<Map<String>> {
         let mut result = Map::new();
@@ -150,13 +150,13 @@ impl NameMappings {
 #[derive(Debug)]
 pub struct NameMappingsCallback(pub Rc<RefCell<NameMappings>>);
 
-/// callback behaviour pseudo code
-/// types: Map ItemId => Info { canonical_ident (final rust name), original_name(item.kind.type.name), HashSet<Alias> }
-/// found_aliases: Map ItemId => Alias
-///
-/// on new type/item: call new composite callback => insert to map, check found_aliases
-/// on new alias: call new alias callback => if alias.type in types types.get(alias.type.id).push_alias(alias) else found_aliases.push(alias)
-/// on resolvedtyperef: call new alias callback => ^ + typeref.name != original_name
+// callback behaviour pseudo code
+// types: Map ItemId => Info { canonical_ident (final rust name), original_name(item.kind.type.name), HashSetAlias> }
+// found_aliases: Map ItemId => Alias
+//
+// on new type/item: call new composite callback => insert to map, check found_aliases
+// on new alias: call new alias callback => if alias.type in types types.get(alias.type.id).push_alias(alias) else found_aliases.push(alias)
+// on resolvedtyperef: call new alias callback => ^ + typeref.name != original_name
 impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
     /// Called when a new composite type is found (struct / union)
     ///
@@ -300,7 +300,7 @@ impl<'var_name> MappingsCodegen<'var_name> {
         self.into()
     }
 
-    /// Should we use the first (by [BTreeSet<String>] ordering) known alias of the types
+    /// Should we use the first (by [`BTreeSet<String>`] ordering) known alias of the types
     /// as the C name used
     ///
     /// default: false
