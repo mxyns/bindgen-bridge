@@ -2,19 +2,18 @@
 
 ## What does this do? 
 
-bindgen-bridge reduces type duplication and headers size by renaming the struct and union types exported by cbindgen.
-
+bindgen-bridge allows transparent use of C structures in Rust by renaming the struct and union types exported by cbindgen.
 It renames them with the same name they had in C before being imported with bindgen.
 
-Example:
+As a consequence, this also helps reducing type duplication and headers size.
+bindgen-bridge also supports aliased/typedefed composite types. 
+
+### Issue solved by bindgen-bridge:
 
 `bindgen` imports the C type `struct my_struct` into Rust with the name `my_struct` (or `struct_my_struct` when using the `c_naming` option).
 `cbindgen` exports this type to C using the exact same name it had in Rust, `my_struct`, instead of its C name `struct my_struct`.
  
 This duplicates the definition of the type and requires casts in the C code to convert between the duplicated types.
-
-It also supports aliased/typedefed composite types. 
-
 
 ## When is this useful?
 
@@ -27,24 +26,29 @@ For example, when writing a Rust library that extends the features of a C projec
 `bindgen-bridge` uses (for now!) a fork of `bindgen` with extended callbacks capabilities 
 that allow it to discover all composite (struct and union) types and their aliases (typedef).
 
-It then reconstructs the original C name of the discovered types and makes a mapping between original type names, Rust type names and their aliases.
+It then reconstructs* the original C name of the discovered types and makes a mapping between original type names, Rust type names and their aliases.
 
 It then offers the possibility to extend a `cbindgen.toml` configuration file's `[export.rename]` section with appropriate renaming rules.
 
 This can be done directly, or between crates by generating toml in a literal string or by using `phf_codegen` to generate a static map.
 
+* we just prepend a `struct` or `union` keyword to the types' name
 
-## How can I use it in my project
+## How can I use this in my project?
 
-You can see my [example project](https://github.com/mxyns/pmacct-gauze) which uses the cross-crate variant of the process.
+You can see an example use of this library in my [project](https://github.com/mxyns/pmacct-gauze) which uses the cross-crate variant of the process.
 
-Basically, a bindings crate called `project-bindings` imports the types from C headers using bindgen, and generates the bindings along with the rename mappings
+Here is what I do in my project. (for simplicity I will be using `project` in place of my project's real name)
+
+Basically, a crate which will contain all bindings; called `project-bindings`, imports the types from C headers using `bindgen`, and generates the Rust bindings (still `bindgen`) along with the rename mappings (`bindgen-bridge`!).
 into a `bindings` module.
 
-Then, the library crate called `project-lib` imports the types from the `project-bindings` crate, and generates a `cbindgen.toml` with the correct renaming rules. 
+Then, the library crate called `project-lib` uses `bindgen-bridge` to import the information about our types from the `project-bindings` crate, and generates a `cbindgen.toml` with the correct renaming rules. 
 
-Finally, it the imported bindings to define a C api, and exports their definition with the correct type names using `cbindgen.toml` (by using the `cargo-c` integration).
+Finally, it uses the imported bindings to define a C api, and exports their definition with the correct type names using `cbindgen.toml` (by using the `cargo-c` integration).
 
+NB: It is **strongly advised if not mandatory** to tell `cbindgen` to ignore the Rust types that were imported from C. 
+You can, for example, add the bindings crate to the crate exlusion list (`[parse.exclude]`) of the `cbindgen.toml` file.
 
 ## Code example
 
