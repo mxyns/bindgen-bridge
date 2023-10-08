@@ -79,21 +79,16 @@ impl<'template> Template<'template> {
         }
 
         let mut document = self.doc.clone().unwrap();
-        let bindings = convert_map(self.bindings.as_ref().unwrap())?;
 
-        let renames = if let Some(table) = document.get_mut("export.rename") {
+        let mut renames = if let Some(table) = document.get_mut("export.rename") {
             table.as_table_mut().unwrap()
         } else {
             document["export"]["rename"] = table();
             document["export"]["rename"].as_table_mut().unwrap()
         };
 
-        bindings.into_iter().for_each(|(rust_name, c_name)| {
-            // need this to escape the string quotes
-            let c_name_text = c_name.as_str().unwrap().to_string();
-            let item = Item::Value(toml_edit::Value::String(Formatted::new(c_name_text)));
-            renames.insert(&rust_name, item);
-        });
+        let bindings = self.bindings.unwrap();
+        extend_toml_table_with_bindings_map(&mut renames, bindings);
 
         Ok(document)
     }
@@ -110,21 +105,21 @@ impl<'template> Template<'template> {
     }
 }
 
-// TODO generate BindingsMap with the toml_edit Map type
-// stop using this as a function
-fn convert_map(input: &BindingsMap) -> Result<Table> {
-    let mut table: Table = Table::new();
+fn extend_toml_table_with_bindings_map(table: &mut Table, map: &BindingsMap) {
 
-    for (key, value) in input.into_iter() {
-        table.insert(key, Item::Value(Value::String(Formatted::new(value.to_string()))));
-    }
-
-    Ok(table)
+    map.into_iter().for_each(|(rust_name, c_name)| {
+        // need this to escape the string quotes
+        let c_name_text = c_name.to_string();
+        table.insert(
+            &rust_name,
+            Item::Value(Value::String(Formatted::new(c_name_text))),
+        );
+    });
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::export::BindingsMap;
+    use crate::export::{BindingsMap, extend_toml_table_with_bindings_map};
     use phf_macros::phf_map;
 
     #[test]
@@ -134,7 +129,8 @@ mod tests {
             "bmp_peer_hdr" => "struct bmp_peer_hdr",
         };
 
-        let converted = crate::export::convert_map(&map).unwrap();
+        let mut converted = toml_edit::Table::new();
+        extend_toml_table_with_bindings_map(&mut converted, &map);
 
         assert_eq!(converted.to_string(),
                    String::from("bmp_peer_hdr = \"struct bmp_peer_hdr\"\nbmp_common_hdr = \"struct bmp_common_hdr\"\n"))
