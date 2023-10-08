@@ -304,7 +304,7 @@ impl<'var_name> MappingsCodegen<'var_name> {
     /// as the C name used
     ///
     /// default: false
-    pub fn use_aliases(mut self, will: bool) -> Self {
+    pub fn use_aliases(&mut self, will: bool) -> &mut Self {
         self.use_aliases = will;
         self
     }
@@ -314,7 +314,7 @@ impl<'var_name> MappingsCodegen<'var_name> {
     /// without the section header to let you use it where you want
     ///
     /// default: false
-    pub fn as_static_map(mut self, will: bool) -> Self {
+    pub fn as_static_map(&mut self, will: bool) -> &mut Self {
         self.as_static_map = will;
         self
     }
@@ -323,7 +323,7 @@ impl<'var_name> MappingsCodegen<'var_name> {
     /// If `None`, the generated code will just be the value, without a variable assignment
     ///
     /// default: None
-    pub fn variable_name(mut self, variable_name: Option<&'var_name str>) -> Self {
+    pub fn variable_name(&mut self, variable_name: Option<&'var_name str>) -> &mut Self {
         self.variable_name = if variable_name.is_some() && variable_name.unwrap() == "" {
             None
         } else {
@@ -334,7 +334,7 @@ impl<'var_name> MappingsCodegen<'var_name> {
     }
 
     /// Generate a [TokenStream] based on all the parameters set on [Self]
-    pub fn generate(self) -> Result<TokenStream> {
+    pub fn generate(&self) -> Result<TokenStream> {
         let quote = if self.as_static_map {
             let map: TokenStream = self
                 .mappings

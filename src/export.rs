@@ -51,7 +51,7 @@ impl<'template> Template<'template> {
     }
 
     /// Reads the path given in [Template::new] as a toml file with [toml_edit]
-    pub fn read_as_toml(mut self) -> Result<Self> {
+    pub fn read_as_toml(&mut self) -> Result<&mut Self> {
         let mut file = File::open(&self.path)?;
         let mut content = if let Ok(metadata) = file.metadata() {
             String::with_capacity(metadata.len() as usize)
@@ -68,13 +68,13 @@ impl<'template> Template<'template> {
     /// Set/Replace the toml [Document] used by the [Template]
     /// Allows to use runtime values instead of loading from disk.
     /// Just provide a file name instead of a path in [Template::new]
-    pub fn use_document(mut self, document: Document) -> Result<Self> {
+    pub fn use_document(&mut self, document: Document) -> Result<&mut Self> {
         self.doc = Some(document);
         Ok(self)
     }
 
     /// Provide the [BindingsMap] to use for the config file generation
-    pub fn with_bindings<'bindings: 'template>(mut self, map: &'bindings BindingsMap) -> Self {
+    pub fn with_bindings<'bindings: 'template>(&mut self, map: &'bindings BindingsMap) -> &mut Self {
         self.bindings = Some(map);
         self
     }
