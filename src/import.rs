@@ -2,16 +2,18 @@ use crate::Result;
 use bindgen::CompKind;
 use phf_codegen::Map;
 use proc_macro2::{Ident, TokenStream};
+use quote::quote;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write;
 use std::rc::Rc;
-use quote::quote;
 
+/// Discovered Type ID
 #[derive(Debug, Default, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
 #[repr(transparent)]
 pub struct Type(usize);
 
+/// One mapping between a type's C name, Rust name, and C aliases
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct NameMapping {
     /// Name of the imported type from C
@@ -22,7 +24,7 @@ pub struct NameMapping {
     rust_name: String,
 
     /// List of known aliases for the type
-    aliases: HashSet<String>,
+    aliases: BTreeSet<String>,
 }
 
 impl NameMapping {
@@ -51,8 +53,11 @@ impl NameMapping {
 
 #[derive(Debug, Default, Clone)]
 pub struct NameMappings {
+    /// The discovered types and their mappings
     types: HashMap<Type, NameMapping>,
-    aliases: HashMap<Type, HashSet<String>>,
+
+    /// The known aliases without an associated type mappings
+    aliases: HashMap<Type, BTreeSet<String>>,
 }
 
 impl NameMappings {
@@ -87,6 +92,10 @@ impl NameMappings {
         Ok(result)
     }
 
+    /// Generates a [phf_codegen] static map from the mappings
+    ///
+    /// Uses the first alias given by the [NameMappings::aliases]'s BTreeSet values for the rename rule
+    /// (no guarantee on which one, but it's likely be based on Strings' alphabetical ordering)
     pub fn to_static_map(&self, use_aliases: bool) -> Result<Map<String>> {
         let mut result = Map::new();
 
@@ -112,16 +121,23 @@ impl NameMappings {
         Ok(result)
     }
 
+    /// Wraps these mappings in a [MappingsCodegen] builder to export the mappings as static code
+    ///
+    /// Reversible with [MappingsCodegen::mappings]
     pub fn codegen<'a>(self) -> MappingsCodegen<'a> {
         self.into()
     }
 }
 
+/// The callback to include with [bindgen::Builder::parse_callbacks] in your `build.rs`
+/// to discover types and aliases during the C header parsing.
 #[derive(Debug)]
 pub struct NameMappingsCallback(pub Rc<RefCell<NameMappings>>);
 
+/// callback behaviour pseudo code
 /// types: Map ItemId => Info { canonical_ident (final rust name), original_name(item.kind.type.name), HashSet<Alias> }
 /// found_aliases: Map ItemId => Alias
+///
 /// on new type/item: call new composite callback => insert to map, check found_aliases
 /// on new alias: call new alias callback => if alias.type in types types.get(alias.type.id).push_alias(alias) else found_aliases.push(alias)
 /// on resolvedtyperef: call new alias callback => ^ + typeref.name != original_name
@@ -142,7 +158,7 @@ impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
         let mut aliases = mappings
             .aliases
             .remove(&id)
-            .unwrap_or_else(|| HashSet::new());
+            .unwrap_or_else(|| BTreeSet::new());
 
         let mut c_name = NameMapping::build_c_name(_kind, _original_name);
 
@@ -203,11 +219,19 @@ impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
     }
 }
 
+/// Code builder used to export mappings by generating [TokenStream]s
 #[derive(Debug, Clone)]
 pub struct MappingsCodegen<'var_name> {
+    /// Mappings used to generate code
     mappings: NameMappings,
+
+    /// see [MappingsCodegen::use_aliases]
     use_aliases: bool,
+
+    /// see [MappingsCodegen::as_static_map]
     as_static_map: bool,
+
+    /// see [MappingsCodegen::variable_name]
     variable_name: Option<&'var_name str>,
 }
 
@@ -217,7 +241,7 @@ impl From<NameMappings> for MappingsCodegen<'_> {
             mappings: value,
             use_aliases: false,
             as_static_map: false,
-            variable_name: None
+            variable_name: None,
         }
     }
 }
@@ -229,18 +253,34 @@ impl From<MappingsCodegen<'_>> for NameMappings {
 }
 
 impl<'var_name> MappingsCodegen<'var_name> {
+    /// Unwrap back into a [NameMappings], loses the settings of the [MappingsCodegen]
     pub fn mappings(self) -> NameMappings {
         self.into()
     }
 
+    /// Should we use the first (by [BTreeSet<String>] ordering) known alias of the types
+    /// as the C name used
+    ///
+    /// default: false
     pub fn use_aliases(mut self, will: bool) -> Self {
         self.use_aliases = will;
         self
     }
+
+    /// Should we export the code as a [Map]
+    /// if `false` (by default) the code generated is a static raw str in a toml format
+    /// without the section header to let you use it where you want
+    ///
+    /// default: false
     pub fn as_static_map(mut self, will: bool) -> Self {
         self.as_static_map = will;
         self
     }
+
+    /// Name of the static variable used to store the exported value in the generated code
+    /// If `None`, the generated code will just be the value, without a variable assignment
+    ///
+    /// default: None
     pub fn variable_name(mut self, variable_name: Option<&'var_name str>) -> Self {
         self.variable_name = if variable_name.is_some() && variable_name.unwrap() == "" {
             None
@@ -251,24 +291,36 @@ impl<'var_name> MappingsCodegen<'var_name> {
         self
     }
 
+    /// Generate a [TokenStream] based on all the parameters set on [Self]
     pub fn generate(self) -> Result<TokenStream> {
-        let bindings_name = self.variable_name.unwrap_or("bindings_renames");
-
         let quote = if self.as_static_map {
-            let map: TokenStream = self.mappings
+            let map: TokenStream = self
+                .mappings
                 .to_static_map(self.use_aliases)?
                 .build()
                 .to_string()
                 .parse()?;
 
-            quote! {
-                pub static #bindings_name : phf::Map<&'static str, &'static str> = #map;
+            if let Some(bindings_name) = self.variable_name {
+                quote! {
+                    pub static #bindings_name : phf::Map<&'static str, &'static str> = #map;
+                }
+            } else {
+                quote! {
+                    #map
+                }
             }
         } else {
             let toml = self.mappings.to_cbindgen_toml_renames(self.use_aliases)?;
 
-            quote! {
-                pub static #bindings_name : &'static str = #toml;
+            if let Some(bindings_name) = self.variable_name {
+                quote! {
+                    pub static #bindings_name : &'static str = #toml;
+                }
+            } else {
+                quote! {
+                    #toml
+                }
             }
         };
 
