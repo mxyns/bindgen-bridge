@@ -9,7 +9,7 @@ description = "Automatically generates renaming rules for cbindgen using the C t
 keywords = ["bindings", "ffi", "code-generation", "bridge", "rename"]
 categories = ["external-ffi-bindings", "development-tools::ffi"]
 license = "MIT"
-readme = "../README.md"
+readme = "README.md"
 repository = "https://github.com/mxyns/bindgen-bridge"
 documentation = "https://docs.rs/bindgen-bridge"
 

@@ -13,12 +13,25 @@ use std::rc::Rc;
 #[repr(transparent)]
 pub struct Type(usize);
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct CName {
+    /// The identifier used to address a type
+    identifier: String,
+
+    /// Whether the name of [CName::identifier] is an alias or not
+    aliased: bool,
+}
+
 /// One mapping between a type's C name, Rust name, and C aliases
-#[derive(Debug, Default, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct NameMapping {
+
+    /// The kind of composite type (struct or union)
+    kind: CompKind,
+
     /// Name of the imported type from C
     /// This is optional because of anonymous types
-    c_name: Option<String>,
+    c_name: Option<CName>,
 
     /// Name of the type in Rust after import by bindgen
     rust_name: String,
@@ -32,17 +45,20 @@ impl NameMapping {
     ///
     /// the name of a struct named A is "struct A"
     /// the name of an union named B is "union A"
-    pub fn build_c_name(kind: CompKind, original_name: Option<&str>) -> Option<String> {
-        let original_name = original_name?;
+    ///
+    /// If the passed name is an alias, keep it that way
+    pub fn validated_original_name(c_name: Option<&CName>, kind: CompKind) -> Option<String> {
+        let original_name = &c_name?.identifier;
 
-        // has a space
+        // has a space because we use it to ensure it is not yet present in the name
         let prefix = match kind {
             CompKind::Struct => "struct ",
             CompKind::Union => "enum ",
         };
 
-        let result = if original_name.starts_with(prefix) {
-            original_name.to_string()
+        // do not prepend the prefix to an aliased type
+        let result = if c_name?.aliased || original_name.starts_with(prefix) {
+            original_name.clone()
         } else {
             format!("{prefix}{original_name}")
         };
@@ -73,9 +89,9 @@ impl NameMappings {
         for (id, mapping) in &self.types {
             let use_name =
                 if mapping.c_name.is_none() || (use_aliases && !mapping.aliases.is_empty()) {
-                    mapping.aliases.iter().next()
+                    mapping.aliases.iter().next().cloned()
                 } else {
-                    mapping.c_name.as_ref()
+                    NameMapping::validated_original_name(mapping.c_name.as_ref(), mapping.kind)
                 };
 
             if let Some(use_name) = use_name {
@@ -102,9 +118,9 @@ impl NameMappings {
         for (id, mapping) in &self.types {
             let use_name =
                 if mapping.c_name.is_none() || (use_aliases && !mapping.aliases.is_empty()) {
-                    mapping.aliases.iter().next()
+                    mapping.aliases.iter().next().cloned()
                 } else {
-                    mapping.c_name.as_ref()
+                    NameMapping::validated_original_name(mapping.c_name.as_ref(), mapping.kind)
                 };
 
             if let Some(use_name) = use_name {
@@ -147,45 +163,68 @@ impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
     /// Saves the type, its name, its aliases
     fn new_composite_found(
         &self,
-        _id: usize,
-        _kind: CompKind,
-        _original_name: Option<&str>,
-        _final_ident: &Ident,
+        id: usize,
+        kind: CompKind,
+        original_name: Option<&str>,
+        final_ident: &Ident,
     ) {
         let mut mappings = self.0.borrow_mut();
 
-        let id = Type(_id);
+        let id = Type(id);
         let mut aliases = mappings
             .aliases
             .remove(&id)
             .unwrap_or_else(|| BTreeSet::new());
 
-        let mut c_name = NameMapping::build_c_name(_kind, _original_name);
+        // if the struct is not anonymous
+        let c_name = if original_name.is_some() {
+
+            // build a non-aliased CName since we know the type's actual name
+            let c_name = original_name.map(|name| CName {
+                identifier: name.to_string(),
+                aliased: false,
+            });
+
+            // remove all aliases with the same name (including the type keyword)
+            // this takes out "struct my_struct" while keeping "my_struct" as an alias for the
+            // typedef struct my_struct {..} my_struct; pattern
+            if let Some(original_name) = NameMapping::validated_original_name(c_name.as_ref(), kind) {
+                aliases.retain(|value| !value.eq(&original_name));
+            }
+
+            c_name
+        }
+        // if the struct is anonymous and we already know an alias for it
+        // we use use the latter as the new name, but remember that it was aliased
+        else if let Some(one_alias) = aliases.iter().next().cloned() {
+            aliases.take(&one_alias).map(|name|
+                CName {
+                    identifier: name,
+                    aliased: true,
+                }
+            )
+        // for an unknown anonymous struct without aliases we can't invent a name
+        } else {
+            None
+        };
 
         println!(
             "kind : {:?} original {:?} => {:?}",
-            _kind, _original_name, c_name
+            kind, original_name, c_name
         );
-        // if the struct is not anonymous, remove all aliases with the same name
-        if c_name.is_some() {
-            aliases.retain(|value| !value.eq(c_name.as_deref().unwrap()));
-        }
-        // if the struct is anonymous we use one of the already known aliases as a name for it
-        else if let Some(one_alias) = aliases.iter().next().cloned() {
-            c_name = aliases.take(&one_alias)
-        }
 
         if let Some(duplicate) = mappings.types.insert(
             id,
             NameMapping {
+                kind,
                 c_name: c_name.clone(), // may still be unknown in case of anonymous struct without known aliases
-                rust_name: _final_ident.to_string(),
+                rust_name: final_ident.to_string(),
                 aliases,
             },
         ) {
             println!(
-                "Warn: duplicated definition for {{ id={} name={:?} }}! previous: {:?}",
-                _id, c_name, duplicate
+                "Warn: duplicated definition for {{ id={:?} name={:?} }}! previous: {:?}",
+                id, c_name, duplicate
             )
         }
     }
@@ -203,7 +242,10 @@ impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
         if let Some(mapping) = mappings.types.get_mut(&target_id) {
             // if the structure was anonymous let's use one of its aliases as a name
             if let None = mapping.c_name {
-                mapping.c_name = Some(aliased_name.clone());
+                mapping.c_name = Some(CName {
+                    identifier: aliased_name,
+                    aliased: true
+                });
             }
             // if it wasn't, remember the alias
             else {
