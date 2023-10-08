@@ -2,6 +2,16 @@
 name = "bindgen-bridge"
 version = "0.1.0"
 edition = "2021"
+authors = [
+    "Maxence Younsi <mx.yns@outlook.fr>"
+]
+description = "Automatically generates renaming rules for cbindgen using the C types discovered by bindgen."
+keywords = ["bindings", "ffi", "code-generation", "bridge", "rename"]
+categories = ["external-ffi-bindings", "development-tools::ffi"]
+license = "MIT"
+readme = "../README.md"
+repository = "https://github.com/mxyns/bindgen-bridge"
+documentation = "https://docs.rs/bindgen-bridge"
 
 [dependencies]
 bindgen = { git = "https://github.com/mxyns/rust-bindgen", branch = "extended-callbacks", version = "0.68.1" }
