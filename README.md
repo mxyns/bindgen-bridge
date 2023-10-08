@@ -104,16 +104,21 @@ In the `build.rs` of your **bindings** crate:
 // The boolean value lets you specify if you'd rather use an existing alias (typedefed `my_struct`) or the raw C name (`struct my_struct`)
 let toml: String = name_mappings.to_cbindgen_toml_renames(false)?;
 
-// You can generate code with the .codegen builder
-let code: String = name_mappings
+// You can generate a TokenStream with the .codegen builder
+let code: TokenStream = name_mappings
         .codegen()
-        .as_static_map(cfg!(feature = "static-renames")); // I like to use a feature for this as well
+        .as_static_map(false)
         .variable_name(Some("my_great_bindings_renames"))
         .use_aliases(true)
         .generate()?;
 }
+/// Generated code 
+/// ```rs
+/// pub static my_great_bindings_renames : &'static str = #toml_string;
+/// ```
 
 // Append `generated_code` to your bindings.rs file or into a separate file if you want to
+...
 ```
 
 #### Exporting as a `phf` static map
@@ -127,11 +132,21 @@ let map: TokenStream = name_mappings
             .to_string()
             .parse()?;
 
-let generated_code = quote! {
-    pub static static_renames: phf::Map<&'static str, &'static str> = #map;
+// You can generate a TokenStream with the .codegen builder
+let code: TokenStream = name_mappings
+        .codegen()
+        .as_static_map(true)
+        .variable_name(Some("my_great_bindings_renames"))
+        .use_aliases(true)
+        .generate()?;
 }
+/// Generated code 
+/// ```rs
+/// pub static my_great_bindings_renames : phf::Map<&'static str, &'static str> = #map_definition_code;
+/// ```
 
 // Append `generated_code` to your bindings.rs file or into a separate file if you want to
+...
 ```
 
 ### Using the rename mappings

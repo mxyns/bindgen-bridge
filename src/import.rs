@@ -268,7 +268,7 @@ impl<'var_name> MappingsCodegen<'var_name> {
             let toml = self.mappings.to_cbindgen_toml_renames(self.use_aliases)?;
 
             quote! {
-                pub static #bindings_name : &'static str = #toml
+                pub static #bindings_name : &'static str = #toml;
             }
         };
 
