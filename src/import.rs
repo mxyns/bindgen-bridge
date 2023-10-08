@@ -1,17 +1,18 @@
 use crate::Result;
 use bindgen::CompKind;
 use phf_codegen::Map;
-use proc_macro2::Ident;
+use proc_macro2::{Ident, TokenStream};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::rc::Rc;
+use quote::quote;
 
-#[derive(Debug, Default, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Default, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
 #[repr(transparent)]
 pub struct Type(usize);
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct NameMapping {
     /// Name of the imported type from C
     /// This is optional because of anonymous types
@@ -48,7 +49,7 @@ impl NameMapping {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct NameMappings {
     types: HashMap<Type, NameMapping>,
     aliases: HashMap<Type, HashSet<String>>,
@@ -109,6 +110,10 @@ impl NameMappings {
         }
 
         Ok(result)
+    }
+
+    pub fn codegen<'a>(self) -> MappingsCodegen<'a> {
+        self.into()
     }
 }
 
@@ -195,6 +200,79 @@ impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
                 .or_default()
                 .insert(aliased_name);
         };
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MappingsCodegen<'var_name> {
+    mappings: NameMappings,
+    use_aliases: bool,
+    as_static_map: bool,
+    variable_name: Option<&'var_name str>,
+}
+
+impl From<NameMappings> for MappingsCodegen<'_> {
+    fn from(value: NameMappings) -> Self {
+        Self {
+            mappings: value,
+            use_aliases: false,
+            as_static_map: false,
+            variable_name: None
+        }
+    }
+}
+
+impl From<MappingsCodegen<'_>> for NameMappings {
+    fn from(value: MappingsCodegen) -> Self {
+        value.mappings
+    }
+}
+
+impl<'var_name> MappingsCodegen<'var_name> {
+    pub fn mappings(self) -> NameMappings {
+        self.into()
+    }
+
+    pub fn use_aliases(mut self, will: bool) -> Self {
+        self.use_aliases = will;
+        self
+    }
+    pub fn as_static_map(mut self, will: bool) -> Self {
+        self.as_static_map = will;
+        self
+    }
+    pub fn variable_name(mut self, variable_name: Option<&'var_name str>) -> Self {
+        self.variable_name = if variable_name.is_some() && variable_name.unwrap() == "" {
+            None
+        } else {
+            variable_name
+        };
+
+        self
+    }
+
+    pub fn generate(self) -> Result<TokenStream> {
+        let bindings_name = self.variable_name.unwrap_or("bindings_renames");
+
+        let quote = if self.as_static_map {
+            let map: TokenStream = self.mappings
+                .to_static_map(self.use_aliases)?
+                .build()
+                .to_string()
+                .parse()?;
+
+            quote! {
+                pub static #bindings_name : phf::Map<&'static str, &'static str> = #map;
+            }
+        } else {
+            let toml = self.mappings.to_cbindgen_toml_renames(self.use_aliases)?;
+
+            quote! {
+                pub static #bindings_name : &'static str = #toml
+            }
+        };
+
+        Ok(quote)
     }
 }
 

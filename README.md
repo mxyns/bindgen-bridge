@@ -104,10 +104,13 @@ In the `build.rs` of your **bindings** crate:
 // The boolean value lets you specify if you'd rather use an existing alias (typedefed `my_struct`) or the raw C name (`struct my_struct`)
 let toml: String = name_mappings.to_cbindgen_toml_renames(false)?;
 
-let generated_code: TokenStream = quote! {
-    pub fn bindings_renames() -> &'static str {
-        #toml
-    }
+// You can generate code with the .codegen builder
+let code: String = name_mappings
+        .codegen()
+        .as_static_map(cfg!(feature = "static-renames")); // I like to use a feature for this as well
+        .variable_name(Some("my_great_bindings_renames"))
+        .use_aliases(true)
+        .generate()?;
 }
 
 // Append `generated_code` to your bindings.rs file or into a separate file if you want to
