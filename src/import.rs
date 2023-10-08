@@ -2,7 +2,7 @@ use crate::Result;
 use bindgen::CompKind;
 use phf_codegen::Map;
 use proc_macro2::{Ident, TokenStream};
-use quote::quote;
+use quote::{format_ident, quote};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write;
@@ -25,7 +25,6 @@ pub struct CName {
 /// One mapping between a type's C name, Rust name, and C aliases
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct NameMapping {
-
     /// The kind of composite type (struct or union)
     pub kind: CompKind,
 
@@ -178,7 +177,6 @@ impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
 
         // if the struct is not anonymous
         let c_name = if original_name.is_some() {
-
             // build a non-aliased CName since we know the type's actual name
             let c_name = original_name.map(|name| CName {
                 identifier: name.to_string(),
@@ -188,7 +186,8 @@ impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
             // remove all aliases with the same name (including the type keyword)
             // this takes out "struct my_struct" while keeping "my_struct" as an alias for the
             // typedef struct my_struct {..} my_struct; pattern
-            if let Some(original_name) = NameMapping::validated_original_name(c_name.as_ref(), kind) {
+            if let Some(original_name) = NameMapping::validated_original_name(c_name.as_ref(), kind)
+            {
                 aliases.retain(|value| !value.eq(&original_name));
             }
 
@@ -197,13 +196,11 @@ impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
         // if the struct is anonymous and we already know an alias for it
         // we use use the latter as the new name, but remember that it was aliased
         else if let Some(one_alias) = aliases.iter().next().cloned() {
-            aliases.take(&one_alias).map(|name|
-                CName {
-                    identifier: name,
-                    aliased: true,
-                }
-            )
-        // for an unknown anonymous struct without aliases we can't invent a name
+            aliases.take(&one_alias).map(|name| CName {
+                identifier: name,
+                aliased: true,
+            })
+            // for an unknown anonymous struct without aliases we can't invent a name
         } else {
             None
         };
@@ -244,7 +241,7 @@ impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
             if let None = mapping.c_name {
                 mapping.c_name = Some(CName {
                     identifier: aliased_name,
-                    aliased: true
+                    aliased: true,
                 });
             }
             // if it wasn't, remember the alias
@@ -335,42 +332,57 @@ impl<'var_name> MappingsCodegen<'var_name> {
 
     /// Generate a [TokenStream] based on all the parameters set on [Self]
     pub fn generate(&self) -> Result<TokenStream> {
-        let quote = if self.as_static_map {
-            let map: TokenStream = self
-                .mappings
-                .to_static_map(self.use_aliases)?
-                .build()
-                .to_string()
-                .parse()?;
+        let variable_name_ident = self.variable_name.map(|name| format_ident!("{}", name));
 
-            if let Some(bindings_name) = self.variable_name {
-                quote! {
-                    pub static #bindings_name : phf::Map<&'static str, &'static str> = #map;
-                }
-            } else {
-                quote! {
-                    #map
-                }
+        let var_type = if self.as_static_map {
+            quote! {
+                phf::Map<&'static str, &'static str>
             }
         } else {
-            let toml = self.mappings.to_cbindgen_toml_renames(self.use_aliases)?;
-
-            if let Some(bindings_name) = self.variable_name {
-                quote! {
-                    pub static #bindings_name : &'static str = #toml;
-                }
-            } else {
-                quote! {
-                    #toml
-                }
+            quote! {
+                &'static str
             }
         };
 
-        Ok(quote)
+        let mut value = if self.as_static_map {
+            self.mappings
+                .to_static_map(self.use_aliases)?
+                .build()
+                .to_string()
+        } else {
+            self.mappings.to_cbindgen_toml_renames(self.use_aliases)?
+        }
+        .parse::<TokenStream>()?;
+
+        if let Some(bindings_name) = variable_name_ident {
+            value = quote! {
+                pub static #bindings_name : #var_type = #value;
+            };
+        }
+
+        Ok(value)
     }
 }
 
+#[cfg(test)]
 mod tests {
+    use crate::import::NameMappings;
+
     #[test]
     fn pass() {}
+
+    #[test]
+    fn codegen() {
+        let mappings = NameMappings::default();
+        let code = mappings
+            .codegen()
+            .variable_name(Some("super_var"))
+            .generate()
+            .unwrap();
+
+        assert_eq!(
+            code.to_string(),
+            "pub static super_var : & 'static str = \"\" ;"
+        )
+    }
 }

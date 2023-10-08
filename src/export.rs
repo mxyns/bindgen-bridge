@@ -74,7 +74,10 @@ impl<'template> Template<'template> {
     }
 
     /// Provide the [BindingsMap] to use for the config file generation
-    pub fn with_bindings<'bindings: 'template>(&mut self, map: &'bindings BindingsMap) -> &mut Self {
+    pub fn with_bindings<'bindings: 'template>(
+        &mut self,
+        map: &'bindings BindingsMap,
+    ) -> &mut Self {
         self.bindings = Some(map);
         self
     }
