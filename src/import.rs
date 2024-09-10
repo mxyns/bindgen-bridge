@@ -97,12 +97,12 @@ impl NameMappings {
     }
 
     /// Generate a cbindgen.toml [export.rename] section, without the section header
-    pub fn to_cbindgen_toml_renames(&self, use_aliases: bool) -> Result<String> {
+    pub fn to_cbindgen_toml_renames(&self, force_aliases_use: bool) -> Result<String> {
         let mut result = String::with_capacity(self.types.len() * 16); // rough approximate of the capacity
 
         for (id, mapping) in &self.types {
             let use_name =
-                if mapping.c_name.is_none() || (use_aliases && !mapping.aliases.is_empty()) {
+                if mapping.c_name.is_none() || (force_aliases_use && !mapping.aliases.is_empty()) {
                     mapping.aliases.iter().next().cloned()
                 } else {
                     NameMapping::validated_original_name(mapping.c_name.as_ref(), mapping.kind)
@@ -125,13 +125,13 @@ impl NameMappings {
     /// Generates a [phf_codegen] static map from the mappings
     ///
     /// Uses the first alias given by the [NameMappings::aliases]'s [BTreeSet] values for the rename rule
-    /// (no guarantee on which one, but it's likely be based on Strings' alphabetical ordering)
-    pub fn to_static_map(&self, use_aliases: bool) -> Result<Map<String>> {
+    /// (no guarantee on which one, but it's likely based on Strings' alphabetical ordering)
+    pub fn to_static_map(&self, force_aliases_use: bool) -> Result<Map<String>> {
         let mut result = Map::new();
 
         for (id, mapping) in &self.types {
             let use_name =
-                if mapping.c_name.is_none() || (use_aliases && !mapping.aliases.is_empty()) {
+                if mapping.c_name.is_none() || (force_aliases_use && !mapping.aliases.is_empty()) {
                     mapping.aliases.iter().next().cloned()
                 } else {
                     NameMapping::validated_original_name(mapping.c_name.as_ref(), mapping.kind)
@@ -291,8 +291,10 @@ pub struct MappingsCodegen<'var_name> {
     /// Mappings used to generate code
     mappings: NameMappings,
 
-    /// see [MappingsCodegen::use_aliases]
-    use_aliases: bool,
+    /// Always promote an alias to be the C name of a struct if possible.
+    /// e.g.: `struct MyStruct` with a `typedef struct MyStruct AliasOfMyStruct` will be known as `AliasOfMyStruct`
+    /// see [MappingsCodegen::force_aliases_use]
+    force_aliases_use: bool,
 
     /// see [MappingsCodegen::as_static_map]
     as_static_map: bool,
@@ -305,7 +307,7 @@ impl From<NameMappings> for MappingsCodegen<'_> {
     fn from(value: NameMappings) -> Self {
         Self {
             mappings: value,
-            use_aliases: false,
+            force_aliases_use: false,
             as_static_map: false,
             variable_name: None,
         }
@@ -325,11 +327,11 @@ impl<'var_name> MappingsCodegen<'var_name> {
     }
 
     /// Should we use the first (by [`BTreeSet<String>`] ordering) known alias of the types
-    /// as the C name used
+    /// as the C name of the types
     ///
     /// default: false
-    pub fn use_aliases(&mut self, will: bool) -> &mut Self {
-        self.use_aliases = will;
+    pub fn force_aliases_use(&mut self, will: bool) -> &mut Self {
+        self.force_aliases_use = will;
         self
     }
 
@@ -373,11 +375,11 @@ impl<'var_name> MappingsCodegen<'var_name> {
 
         let mut value = if self.as_static_map {
             self.mappings
-                .to_static_map(self.use_aliases)?
+                .to_static_map(self.force_aliases_use)?
                 .build()
                 .to_string()
         } else {
-            self.mappings.to_cbindgen_toml_renames(self.use_aliases)?
+            self.mappings.to_cbindgen_toml_renames(self.force_aliases_use)?
         }
             .parse::<TokenStream>()?;
 
