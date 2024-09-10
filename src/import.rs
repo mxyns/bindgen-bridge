@@ -1,17 +1,14 @@
-use crate::Result;
-use bindgen::CompKind;
-use phf_codegen::Map;
-use proc_macro2::{Ident, TokenStream};
-use quote::{format_ident, quote};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write;
 use std::rc::Rc;
 
-/// Discovered Type ID
-#[derive(Debug, Default, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
-#[repr(transparent)]
-pub struct Type(usize);
+use bindgen::callbacks::{DiscoveredItem, DiscoveredItemId};
+use phf_codegen::Map;
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
+
+use crate::Result;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CName {
@@ -22,11 +19,29 @@ pub struct CName {
     pub aliased: bool,
 }
 
+#[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq)]
+pub enum CompositeKind {
+    Struct,
+    Union,
+}
+
+impl TryFrom<&DiscoveredItem> for CompositeKind {
+    type Error = ();
+
+    fn try_from(value: &DiscoveredItem) -> std::result::Result<Self, Self::Error> {
+        match value {
+            DiscoveredItem::Struct { .. } => Ok(Self::Struct),
+            DiscoveredItem::Union { .. } => Ok(Self::Union),
+            DiscoveredItem::Alias { .. } => Err(())
+        }
+    }
+}
+
 /// One mapping between a type's C name, Rust name, and C aliases
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct NameMapping {
     /// The kind of composite type (struct or union)
-    pub kind: CompKind,
+    pub kind: CompositeKind,
 
     /// Name of the imported type from C
     /// This is optional because of anonymous types
@@ -46,13 +61,13 @@ impl NameMapping {
     /// the name of an union named B is "union A"
     ///
     /// If the passed name is an alias, keep it that way
-    pub fn validated_original_name(c_name: Option<&CName>, kind: CompKind) -> Option<String> {
+    pub fn validated_original_name(c_name: Option<&CName>, kind: CompositeKind) -> Option<String> {
         let original_name = &c_name?.identifier;
 
         // has a space because we use it to ensure it is not yet present in the name
         let prefix = match kind {
-            CompKind::Struct => "struct ",
-            CompKind::Union => "enum ",
+            CompositeKind::Struct => "struct ",
+            CompositeKind::Union => "enum ",
         };
 
         // do not prepend the prefix to an aliased type
@@ -66,13 +81,13 @@ impl NameMapping {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct NameMappings {
     /// The discovered types and their mappings
-    pub types: HashMap<Type, NameMapping>,
+    pub types: HashMap<DiscoveredItemId, NameMapping>,
 
     /// The known aliases without an associated type mappings
-    pub aliases: HashMap<Type, BTreeSet<String>>,
+    pub aliases: HashMap<DiscoveredItemId, BTreeSet<String>>,
 }
 
 impl NameMappings {
@@ -97,8 +112,8 @@ impl NameMappings {
                 writeln!(&mut result, "\"{}\" = \"{}\"", mapping.rust_name, use_name)?;
             } else {
                 eprintln!(
-                    "Warn: type with no valid name during rename export! id={} info={:#?}",
-                    id.0, mapping
+                    "Warn: type with no valid name during rename export! id={:#?} info={:#?}",
+                    id, mapping
                 );
                 continue;
             }
@@ -126,8 +141,8 @@ impl NameMappings {
                 result.entry(mapping.rust_name.clone(), &format!("\"{}\"", use_name));
             } else {
                 eprintln!(
-                    "Warn: type with no valid name during rename export! id={} info={:#?}",
-                    id.0, mapping
+                    "Warn: type with no valid name during rename export! id={:#?} info={:#?}",
+                    id, mapping
                 );
                 continue;
             }
@@ -157,19 +172,32 @@ pub struct NameMappingsCallback(pub Rc<RefCell<NameMappings>>);
 // on new alias: call new alias callback => if alias.type in types types.get(alias.type.id).push_alias(alias) else found_aliases.push(alias)
 // on resolvedtyperef: call new alias callback => ^ + typeref.name != original_name
 impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
+    fn new_item_found(&self, id: DiscoveredItemId, item: DiscoveredItem) {
+        match &item {
+            DiscoveredItem::Struct { original_name, final_name }
+            | DiscoveredItem::Union { original_name, final_name } => {
+                self.new_composite_found(id, CompositeKind::try_from(&item).unwrap(), original_name.as_ref().map(String::as_str), final_name)
+            }
+            DiscoveredItem::Alias { alias_name, alias_for } => {
+                self.new_alias_found(id, alias_name, *alias_for)
+            }
+        }
+    }
+}
+
+impl NameMappingsCallback {
     /// Called when a new composite type is found (struct / union)
     ///
     /// Saves the type, its name, its aliases
     fn new_composite_found(
         &self,
-        id: usize,
-        kind: CompKind,
+        id: DiscoveredItemId,
+        kind: CompositeKind,
         original_name: Option<&str>,
-        final_ident: &Ident,
+        final_ident: &str,
     ) {
         let mut mappings = self.0.borrow_mut();
 
-        let id = Type(id);
         let mut aliases = mappings
             .aliases
             .remove(&id)
@@ -228,13 +256,12 @@ impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
 
     /// Called when a new alias is found
     ///
-    /// Saves the alias either as an alias or the base name (if none is known yet) for known types
+    /// Saves the alias either as an alias or the base name (if none is known yet) for known types.
     /// The alias is saved for later when the type is not known yet
-    fn new_alias_found(&self, _id: usize, _alias_name: &Ident, _alias_for: usize) {
+    fn new_alias_found(&self, _id: DiscoveredItemId, alias_name: &str, target_id: DiscoveredItemId) {
         let mut mappings = self.0.borrow_mut();
 
-        let target_id = Type(_alias_for);
-        let aliased_name = _alias_name.to_string();
+        let aliased_name = alias_name.to_string();
 
         if let Some(mapping) = mappings.types.get_mut(&target_id) {
             // if the structure was anonymous let's use one of its aliases as a name
@@ -352,7 +379,7 @@ impl<'var_name> MappingsCodegen<'var_name> {
         } else {
             self.mappings.to_cbindgen_toml_renames(self.use_aliases)?
         }
-        .parse::<TokenStream>()?;
+            .parse::<TokenStream>()?;
 
         if let Some(bindings_name) = variable_name_ident {
             value = quote! {
@@ -366,10 +393,92 @@ impl<'var_name> MappingsCodegen<'var_name> {
 
 #[cfg(test)]
 mod tests {
-    use crate::import::NameMappings;
+    use std::cell::RefCell;
+    use std::collections::{BTreeSet, HashMap};
+    use std::rc::Rc;
+
+    use bindgen::Builder;
+    use bindgen::callbacks::DiscoveredItemId;
+
+    use crate::import::{CName, NameMapping, NameMappings, NameMappingsCallback};
+    use crate::import::CompositeKind::{Struct, Union};
 
     #[test]
     fn pass() {}
+
+    #[test]
+    fn test_mappings() {
+
+        let mappings = Rc::new(RefCell::new(NameMappings::default()));
+        Builder::default()
+            .header_contents("sample_header.h","
+                // Unions
+                void function_using_anonymous_struct(struct {} arg0);
+
+                struct NamedStruct {
+                };
+
+                typedef struct NamedStruct AliasOfNamedStruct;
+
+
+                // Unions
+                void function_using_anonymous_union(union {} arg0);
+
+                union NamedUnion {
+                };
+
+                typedef union NamedUnion AliasOfNamedUnion;
+        ")
+            .parse_callbacks(Box::new(NameMappingsCallback(Rc::clone(&mappings))))
+            .generate()
+            .unwrap();
+
+        let expected =  NameMappings {
+            types: HashMap::from([
+                (DiscoveredItemId::new(1),
+                 NameMapping {
+                    kind: Struct,
+                    c_name: None,
+                    rust_name: "_bindgen_ty_1".to_string(),
+                    aliases: BTreeSet::default(),
+                }),
+                (DiscoveredItemId::new(10),
+                 NameMapping {
+                    kind: Union,
+                    c_name: None,
+                    rust_name: "_bindgen_ty_2".to_string(),
+                    aliases: BTreeSet::default(),
+                }),
+                (DiscoveredItemId::new(16),
+                 NameMapping {
+                    kind: Union,
+                    c_name: Some(
+                        CName {
+                            identifier: "NamedUnion".to_string(),
+                            aliased: false,
+                        },
+                    ),
+                    rust_name: "NamedUnion".to_string(),
+                    aliases: BTreeSet::from(["AliasOfNamedUnion".to_string()])
+                }),
+                (DiscoveredItemId::new(7),
+                    NameMapping {
+                    kind: Struct,
+                    c_name: Some(
+                        CName {
+                            identifier: "NamedStruct".to_string(),
+                            aliased: false,
+                        },
+                    ),
+                    rust_name: "NamedStruct".to_string(),
+                    aliases: BTreeSet::from(["AliasOfNamedStruct".to_string()])
+                })
+            ]),
+            aliases: HashMap::default(),
+        };
+        
+        assert!(expected.eq(&mappings.borrow()));
+    }
 
     #[test]
     fn codegen() {

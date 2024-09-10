@@ -14,7 +14,7 @@ repository = "https://github.com/mxyns/bindgen-bridge"
 documentation = "https://docs.rs/bindgen-bridge"
 
 [dependencies]
-bindgen = { git = "https://github.com/mxyns/rust-bindgen", branch = "extended-callbacks", version = "0.68.1" }
+bindgen = { git = "https://github.com/mxyns/rust-bindgen", branch = "extended-callbacks", version = "0.70.1" }
 proc-macro2 = "1.0.67"
 toml = "0.8.2"
 toml_edit = "0.20.2"
