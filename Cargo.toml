@@ -14,10 +14,10 @@ repository = "https://github.com/mxyns/bindgen-bridge"
 documentation = "https://docs.rs/bindgen-bridge"
 
 [dependencies]
-bindgen = { git = "https://github.com/mxyns/rust-bindgen", branch = "extended-callbacks", version = "0.70.1" }
+bindgen = { version = "0.71.1" }
 proc-macro2 = "1.0.67"
 toml = "0.8.2"
-toml_edit = "0.20.2"
+toml_edit = "0.22.24"
 phf = { version = "0.11.1", default-features = false }
 phf_codegen = "0.11.1"
 quote = "1.0.33"

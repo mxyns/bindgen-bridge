@@ -330,8 +330,8 @@ impl<'var_name> MappingsCodegen<'var_name> {
     /// as the C name of the types
     ///
     /// default: false
-    pub fn force_aliases_use(&mut self, will: bool) -> &mut Self {
-        self.force_aliases_use = will;
+    pub fn force_aliases_use(&mut self, yes: bool) -> &mut Self {
+        self.force_aliases_use = yes;
         self
     }
 
@@ -340,8 +340,8 @@ impl<'var_name> MappingsCodegen<'var_name> {
     /// without the section header to let you use it where you want
     ///
     /// default: false
-    pub fn as_static_map(&mut self, will: bool) -> &mut Self {
-        self.as_static_map = will;
+    pub fn as_static_map(&mut self, yes: bool) -> &mut Self {
+        self.as_static_map = yes;
         self
     }
 
@@ -379,7 +379,7 @@ impl<'var_name> MappingsCodegen<'var_name> {
                 .build()
                 .to_string()
         } else {
-            self.mappings.to_cbindgen_toml_renames(self.force_aliases_use)?
+            format!("\"{}\"", self.mappings.to_cbindgen_toml_renames(self.force_aliases_use)?.replace('"', "\\\""))
         }
             .parse::<TokenStream>()?;
 
@@ -485,6 +485,7 @@ mod tests {
     #[test]
     fn codegen() {
         let mappings = NameMappings::default();
+
         let code = mappings
             .codegen()
             .variable_name(Some("super_var"))

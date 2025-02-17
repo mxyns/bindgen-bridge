@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::str::FromStr;
-use toml_edit::{table, Document, Formatted, Item, Table, Value};
+use toml_edit::{table, DocumentMut, Formatted, Item, Table, Value};
 
 /// Alias of the bindings as a [phf_codegen::Map]
 pub type BindingsMap = phf::Map<&'static str, &'static str>;
@@ -36,7 +36,7 @@ impl Error for TemplateError {}
 /// A `cbindgen.toml` template
 pub struct Template<'bindings> {
     path: PathBuf,
-    doc: Option<Document>,
+    doc: Option<DocumentMut>,
     bindings: Option<&'bindings BindingsMap>,
 }
 
@@ -60,7 +60,7 @@ impl<'template> Template<'template> {
         };
 
         file.read_to_string(&mut content)?;
-        self.doc = Some(Document::from_str(&content)?);
+        self.doc = Some(DocumentMut::from_str(&content)?);
 
         Ok(self)
     }
@@ -68,7 +68,7 @@ impl<'template> Template<'template> {
     /// Set/Replace the toml [Document] used by the [Template]
     /// Allows to use runtime values instead of loading from disk.
     /// Just provide a file name instead of a path in [Template::new]
-    pub fn use_document(&mut self, document: Document) -> Result<&mut Self> {
+    pub fn use_document(&mut self, document: DocumentMut) -> Result<&mut Self> {
         self.doc = Some(document);
         Ok(self)
     }
@@ -84,7 +84,7 @@ impl<'template> Template<'template> {
 
     /// Generate a toml [Document] with the `[export.rename]` section containing the rename rules for our bindings
     /// WILL NOT overwrite an existing `[export.rename]` table, but WILL overwrite a colliding entry in it
-    pub fn generate_toml(&self) -> Result<Document> {
+    pub fn generate_toml(&self) -> Result<DocumentMut> {
         if self.bindings.is_none() {
             return Err(Box::new(TemplateError::MissingBindings));
         }
