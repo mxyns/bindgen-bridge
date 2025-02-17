@@ -9,3 +9,6 @@ pub mod export;
 
 /// Common Result Wrapper
 pub type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
+/// bindgen re-export
+pub use bindgen;
