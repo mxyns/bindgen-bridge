@@ -95,7 +95,7 @@ impl<'template> Template<'template> {
 
         let mut document = self.doc.clone().unwrap();
 
-        let mut renames = if let Some(table) = document.get_mut("export.rename") {
+        let renames = if let Some(table) = document.get_mut("export.rename") {
             table.as_table_mut().unwrap()
         } else {
             document["export"]["rename"] = table();
@@ -103,7 +103,7 @@ impl<'template> Template<'template> {
         };
 
         let bindings = self.bindings.unwrap();
-        extend_toml_table_with_bindings_map(&mut renames, bindings);
+        extend_toml_table_with_bindings_map(renames, bindings);
 
         Ok(document)
     }
@@ -130,7 +130,7 @@ fn extend_toml_table_with_bindings_map(table: &mut Table, map: &BindingsMap) {
         // need this to escape the string quotes
         let c_name_text = c_name.to_string();
         table.insert(
-            &rust_name,
+            rust_name,
             Item::Value(Value::String(Formatted::new(c_name_text))),
         );
     });

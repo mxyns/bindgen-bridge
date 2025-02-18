@@ -32,7 +32,7 @@ impl TryFrom<&DiscoveredItem> for CompositeKind {
         match value {
             DiscoveredItem::Struct { .. } => Ok(Self::Struct),
             DiscoveredItem::Union { .. } => Ok(Self::Union),
-            DiscoveredItem::Alias { .. } => Err(())
+            DiscoveredItem::Alias { .. } => Err(()),
         }
     }
 }
@@ -174,13 +174,23 @@ pub struct NameMappingsCallback(pub Rc<RefCell<NameMappings>>);
 impl bindgen::callbacks::ParseCallbacks for NameMappingsCallback {
     fn new_item_found(&self, id: DiscoveredItemId, item: DiscoveredItem) {
         match &item {
-            DiscoveredItem::Struct { original_name, final_name }
-            | DiscoveredItem::Union { original_name, final_name } => {
-                self.new_composite_found(id, CompositeKind::try_from(&item).unwrap(), original_name.as_ref().map(String::as_str), final_name)
+            DiscoveredItem::Struct {
+                original_name,
+                final_name,
             }
-            DiscoveredItem::Alias { alias_name, alias_for } => {
-                self.new_alias_found(id, alias_name, *alias_for)
-            }
+            | DiscoveredItem::Union {
+                original_name,
+                final_name,
+            } => self.new_composite_found(
+                id,
+                CompositeKind::try_from(&item).unwrap(),
+                original_name.as_ref().map(String::as_str),
+                final_name,
+            ),
+            DiscoveredItem::Alias {
+                alias_name,
+                alias_for,
+            } => self.new_alias_found(id, alias_name, *alias_for),
         }
     }
 }
@@ -201,7 +211,7 @@ impl NameMappingsCallback {
         let mut aliases = mappings
             .aliases
             .remove(&id)
-            .unwrap_or_else(|| BTreeSet::new());
+            .unwrap_or_default();
 
         // if the struct is not anonymous
         let c_name = if original_name.is_some() {
@@ -258,14 +268,19 @@ impl NameMappingsCallback {
     ///
     /// Saves the alias either as an alias or the base name (if none is known yet) for known types.
     /// The alias is saved for later when the type is not known yet
-    fn new_alias_found(&self, _id: DiscoveredItemId, alias_name: &str, target_id: DiscoveredItemId) {
+    fn new_alias_found(
+        &self,
+        _id: DiscoveredItemId,
+        alias_name: &str,
+        target_id: DiscoveredItemId,
+    ) {
         let mut mappings = self.0.borrow_mut();
 
         let aliased_name = alias_name.to_string();
 
         if let Some(mapping) = mappings.types.get_mut(&target_id) {
             // if the structure was anonymous let's use one of its aliases as a name
-            if let None = mapping.c_name {
+            if mapping.c_name.is_none() {
                 mapping.c_name = Some(CName {
                     identifier: aliased_name,
                     aliased: true,
@@ -379,9 +394,14 @@ impl<'var_name> MappingsCodegen<'var_name> {
                 .build()
                 .to_string()
         } else {
-            format!("\"{}\"", self.mappings.to_cbindgen_toml_renames(self.force_aliases_use)?.replace('"', "\\\""))
+            format!(
+                "\"{}\"",
+                self.mappings
+                    .to_cbindgen_toml_renames(self.force_aliases_use)?
+                    .replace('"', "\\\"")
+            )
         }
-            .parse::<TokenStream>()?;
+        .parse::<TokenStream>()?;
 
         if let Some(bindings_name) = variable_name_ident {
             value = quote! {
@@ -399,21 +419,22 @@ mod tests {
     use std::collections::{BTreeSet, HashMap};
     use std::rc::Rc;
 
-    use bindgen::Builder;
     use bindgen::callbacks::DiscoveredItemId;
+    use bindgen::Builder;
 
-    use crate::import::{CName, NameMapping, NameMappings, NameMappingsCallback};
     use crate::import::CompositeKind::{Struct, Union};
+    use crate::import::{CName, NameMapping, NameMappings, NameMappingsCallback};
 
     #[test]
     fn pass() {}
 
     #[test]
     fn test_mappings() {
-
         let mappings = Rc::new(RefCell::new(NameMappings::default()));
         Builder::default()
-            .header_contents("sample_header.h","
+            .header_contents(
+                "sample_header.h",
+                "
                 // Unions
                 void function_using_anonymous_struct(struct {} arg0);
 
@@ -430,55 +451,60 @@ mod tests {
                 };
 
                 typedef union NamedUnion AliasOfNamedUnion;
-        ")
+        ",
+            )
             .parse_callbacks(Box::new(NameMappingsCallback(Rc::clone(&mappings))))
             .generate()
             .unwrap();
 
-        let expected =  NameMappings {
+        let expected = NameMappings {
             types: HashMap::from([
-                (DiscoveredItemId::new(1),
-                 NameMapping {
-                    kind: Struct,
-                    c_name: None,
-                    rust_name: "_bindgen_ty_1".to_string(),
-                    aliases: BTreeSet::default(),
-                }),
-                (DiscoveredItemId::new(10),
-                 NameMapping {
-                    kind: Union,
-                    c_name: None,
-                    rust_name: "_bindgen_ty_2".to_string(),
-                    aliases: BTreeSet::default(),
-                }),
-                (DiscoveredItemId::new(16),
-                 NameMapping {
-                    kind: Union,
-                    c_name: Some(
-                        CName {
+                (
+                    DiscoveredItemId::new(1),
+                    NameMapping {
+                        kind: Struct,
+                        c_name: None,
+                        rust_name: "_bindgen_ty_1".to_string(),
+                        aliases: BTreeSet::default(),
+                    },
+                ),
+                (
+                    DiscoveredItemId::new(10),
+                    NameMapping {
+                        kind: Union,
+                        c_name: None,
+                        rust_name: "_bindgen_ty_2".to_string(),
+                        aliases: BTreeSet::default(),
+                    },
+                ),
+                (
+                    DiscoveredItemId::new(16),
+                    NameMapping {
+                        kind: Union,
+                        c_name: Some(CName {
                             identifier: "NamedUnion".to_string(),
                             aliased: false,
-                        },
-                    ),
-                    rust_name: "NamedUnion".to_string(),
-                    aliases: BTreeSet::from(["AliasOfNamedUnion".to_string()])
-                }),
-                (DiscoveredItemId::new(7),
+                        }),
+                        rust_name: "NamedUnion".to_string(),
+                        aliases: BTreeSet::from(["AliasOfNamedUnion".to_string()]),
+                    },
+                ),
+                (
+                    DiscoveredItemId::new(7),
                     NameMapping {
-                    kind: Struct,
-                    c_name: Some(
-                        CName {
+                        kind: Struct,
+                        c_name: Some(CName {
                             identifier: "NamedStruct".to_string(),
                             aliased: false,
-                        },
-                    ),
-                    rust_name: "NamedStruct".to_string(),
-                    aliases: BTreeSet::from(["AliasOfNamedStruct".to_string()])
-                })
+                        }),
+                        rust_name: "NamedStruct".to_string(),
+                        aliases: BTreeSet::from(["AliasOfNamedStruct".to_string()]),
+                    },
+                ),
             ]),
             aliases: HashMap::default(),
         };
-        
+
         assert!(expected.eq(&mappings.borrow()));
     }
 
